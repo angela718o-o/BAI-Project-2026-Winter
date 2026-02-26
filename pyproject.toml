@@ -10,7 +10,8 @@ requires-python = ">=3.13"
 dependencies = [
     "numpy (>=2.4.2,<3.0.0)",
     "pandas (>=3.0.1,<4.0.0)",
-    "scikit-learn (>=1.8.0,<2.0.0)"
+    "scikit-learn (>=1.8.0,<2.0.0)",
+    "yfinance (>=1.2.0,<2.0.0)"
 ]
 
 [tool.poetry]
