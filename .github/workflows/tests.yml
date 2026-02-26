@@ -1,0 +1,35 @@
+# When to run
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Get code from repo
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Install Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.1" # Match this to your pyproject.toml
+
+      # Install Poetry
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      # Install your project dependencies
+      - name: Install dependencies
+        run: poetry install
+
+      # Run the tests using pytest
+      - name: Run pytest
+        run: poetry run pytest
