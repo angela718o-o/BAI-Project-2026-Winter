@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -8,6 +9,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "processed" / "combined_features.csv"
+MODEL_PATH = Path(__file__).resolve().parents[2] / "data" / "processed" / "model.joblib"
 TARGET = "ev_to_ebitda"
 QUANT_COLS = [
     "shares_outstanding", "total_debt", "total_cash", "ebitda",
@@ -129,19 +131,12 @@ def predict_ticker(ticker: str, model, scaler, embed_cols) -> dict:
     return {"predicted": predicted, "actual": actual}
 
 
-if __name__ == "__main__":
-    out = train()
-    print(f"Test R2:  {out['r2']:.4f}")
-    print(f"Test MSE: {out['mse']:.4f}")
+def save_artifacts(out: dict, path: Path = MODEL_PATH) -> None:
+    joblib.dump(
+        {k: out[k] for k in ("model", "scaler", "embed_cols", "r2", "mse")},
+        path,
+    )
 
-    import sys
-    if len(sys.argv) > 1:
-        for t in sys.argv[1:]:
-            try:
-                r = predict_ticker(t, out["model"], out["scaler"], out["embed_cols"])
-                actual = r["actual"]
-                actual_str = f"{actual:.2f}" if actual is not None else "N/A"
-                diff_str = f", diff={r['predicted'] - actual:+.2f}" if actual is not None else ""
-                print(f"{t}: predicted={r['predicted']:.2f}, actual={actual_str}{diff_str}")
-            except Exception as e:
-                print(f"{t}: failed — {e}")
+
+def load_artifacts(path: Path = MODEL_PATH) -> dict:
+    return joblib.load(path)
