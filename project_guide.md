@@ -1,0 +1,1 @@
+we are trying to build a public comps estimator with both quantitative data, qualitative data and business descriptions (converted in to embeddings).
