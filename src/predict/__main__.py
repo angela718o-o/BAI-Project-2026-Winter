@@ -10,7 +10,7 @@ print(f"Saved -> {MODEL_PATH}")
 
 for t in sys.argv[1:]:
     try:
-        r = predict_ticker(t, out["model"], out["scaler"], out["embed_cols"])
+        r = predict_ticker(t, out["models"], out["imputer"], out["scaler"], out["pca"], out["embed_cols"])
         actual = r["actual"]
         actual_str = f"{actual:.2f}" if actual is not None else "N/A"
         diff_str = f", diff={r['predicted'] - actual:+.2f}" if actual is not None else ""
