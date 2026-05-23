@@ -28,7 +28,8 @@ if st.button("Predict", type="primary") and ticker:
     with st.spinner(f"Fetching {ticker} from yfinance and predicting..."):
         try:
             r = predict_ticker(
-                ticker, artifacts["models"], artifacts["imputer"], artifacts["scaler"], artifacts["pca"], artifacts["embed_cols"]
+                ticker, artifacts["models"], artifacts["imputer"], artifacts["scaler"],
+                artifacts["pca"], artifacts["ohe_cols"], artifacts["embed_cols"]
             )
         except Exception as e:
             st.error(f"Failed: {e}")
