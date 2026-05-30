@@ -1,7 +1,5 @@
-...
-[6:27 PM, 2/18/2026] Ryan Fue: cat <<EOT >> .gitignore
 # Python & Build Artifacts
-_pycache_/
+__pycache__/
 *.py[cod]
 *.so
 .Python
@@ -34,10 +32,11 @@ ENV/
 # Jupyter Notebooks
 .ipynb_checkpoints
 
-# Project specific 
-data/
+# Data — exclude raw/processed CSVs but keep the trained model for deployment
+data/**
+!data/processed/
+!data/processed/model.joblib
+
+# Environment & OS
 .env
 .DS_Store
-EOT
-[6:27 PM, 2/18/2026] Ryan Fue: And then run…
-git add .

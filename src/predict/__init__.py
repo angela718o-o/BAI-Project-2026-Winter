@@ -14,16 +14,28 @@ DATA_PATH    = Path(__file__).resolve().parents[2] / "data" / "processed" / "com
 METRICS_PATH = Path(__file__).resolve().parents[2] / "data" / "processed" / "cleaned_metrics.csv"
 MODEL_PATH   = Path(__file__).resolve().parents[2] / "data" / "processed" / "model.joblib"
 TARGET = "ev_to_ebitda"
-QUANT_COLS = ["ebitda_margin", "debt_to_equity", "net_debt_to_ebitda"]
+# All 7 quant features used in the notebook's best model (Plan D).
+QUANT_COLS = [
+    "shares_outstanding", "total_debt", "total_cash", "ebitda",
+    "debt_to_equity", "ebitda_margin", "forwardPE",
+]
 CATEGORICAL_COLS = ["sector", "industry"]
-LOG_COLS: list = []  # all quant features are ratios; no log transform needed
-# Must match the model used in data/processed/new_processing.ipynb to embed training data.
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
-EMBED_DIM = 384
-# Reduce 384-dim embeddings so they don't drown out quant features.
 PCA_COMPONENTS = 20
-# Seeds for bagged XGBoost — average predictions across these to reduce variance.
 BAG_SEEDS = [42, 7, 13, 99, 2024]
+
+# Optuna best params from notebook (Plan D: test R² ≈ 0.54, Spearman ρ ≈ 0.75).
+_BEST_PARAMS = {
+    "n_estimators": 469,
+    "max_depth": 8,
+    "learning_rate": 0.018526066660175013,
+    "subsample": 0.7242793234086645,
+    "colsample_bytree": 0.825868423791473,
+    "min_child_weight": 2,
+    "reg_alpha": 0.24780887061061857,
+    "reg_lambda": 3.1678045863649835,
+    "verbosity": 0,
+}
 
 _YF_TO_FEATURE = {
     "shares_outstanding": "sharesOutstanding",
@@ -32,39 +44,42 @@ _YF_TO_FEATURE = {
     "ebitda": "ebitda",
     "debt_to_equity": "debtToEquity",
     "ebitda_margin": "ebitdaMargins",
-    "forwardPE": "forwardPE",
+    "forwardPE": "forwardPE",  # optional — imputed by KNNImputer if missing
 }
+
+# Fields that cannot be meaningfully imputed and are required for prediction.
+_REQUIRED_FIELDS = {"shares_outstanding", "total_debt", "total_cash", "ebitda", "debt_to_equity", "ebitda_margin"}
 
 _embed_model = None
 
 
 def load_dataset(path: Path = DATA_PATH, metrics_path: Path = METRICS_PATH):
     df = pd.read_csv(path, index_col="ticker")
-    # Merge sector + industry — not in combined_features.csv but already in cleaned_metrics.csv
     meta = pd.read_csv(metrics_path)[["ticker", "sector", "industry"]].set_index("ticker")
     df = df.join(meta, how="left")
 
     X = df.drop(columns=[TARGET]).replace([np.inf, -np.inf], np.nan)
     y = df[TARGET].replace([np.inf, -np.inf], np.nan)
 
-    # Only drop rows where y is invalid; NaN in X will be filled by KNNImputer in build_features.
     mask = y.notna() & (y > 0) & (y < 50)
     X, y = X[mask].copy(), y[mask].copy()
 
-    # Derive net_debt_to_ebitda — scale-independent leverage ratio, clipped to avoid blow-up.
+    # Clip debt_to_equity at 99th pct — extreme outliers skew the model.
+    dte_cap = X["debt_to_equity"].quantile(0.99)
+    X["debt_to_equity"] = X["debt_to_equity"].clip(upper=dte_cap)
+
+    # Derive net_debt_to_ebitda (available in X but not in QUANT_COLS — kept for completeness).
     X["net_debt_to_ebitda"] = (
         (X["total_debt"] - X["total_cash"]) / X["ebitda"].replace(0, np.nan)
     ).clip(-15, 30)
 
     y = np.log1p(y)
-
     return X, y
 
 
 def build_features(X_train: pd.DataFrame, X_test: pd.DataFrame):
     embed_cols = [c for c in X_train.columns if c.startswith("embed_")]
 
-    # KNNImputer fills missing quant values; fit on train only to avoid leakage.
     imputer = KNNImputer(n_neighbors=5)
     quant_train_imp = imputer.fit_transform(X_train[QUANT_COLS])
     quant_test_imp  = imputer.transform(X_test[QUANT_COLS])
@@ -77,7 +92,6 @@ def build_features(X_train: pd.DataFrame, X_test: pd.DataFrame):
     embed_train = pca.fit_transform(X_train[embed_cols].values)
     embed_test  = pca.transform(X_test[embed_cols].values)
 
-    # One-hot encode sector + industry; fit on train categories only.
     ohe_train = pd.get_dummies(X_train[CATEGORICAL_COLS].fillna("Unknown"), dtype=float)
     ohe_test  = pd.get_dummies(X_test[CATEGORICAL_COLS].fillna("Unknown"),  dtype=float).reindex(
         columns=ohe_train.columns, fill_value=0.0)
@@ -98,11 +112,7 @@ def train(test_size: float = 0.2, random_state: int = 42):
     models = []
     preds = []
     for seed in BAG_SEEDS:
-        m = xgb.XGBRegressor(
-            n_estimators=200, learning_rate=0.05, max_depth=4,
-            subsample=0.8, colsample_bytree=0.8,
-            random_state=seed, verbosity=0,
-        )
+        m = xgb.XGBRegressor(**_BEST_PARAMS, random_state=seed)
         m.fit(X_all_train, y_train)
         models.append(m)
         preds.append(m.predict(X_all_test))
@@ -122,14 +132,11 @@ def train(test_size: float = 0.2, random_state: int = 42):
 
 def predict_ev_to_ebitda(X: pd.DataFrame, models, imputer, scaler, pca, ohe_cols, embed_cols):
     X = X.copy()
-    for c in LOG_COLS:
-        X[c] = np.sign(X[c]) * np.log1p(np.abs(X[c]))
     quant = scaler.transform(imputer.transform(X[QUANT_COLS]))
     embed = pca.transform(X[embed_cols].values)
     ohe   = pd.get_dummies(X[CATEGORICAL_COLS].fillna("Unknown"), dtype=float).reindex(
         columns=ohe_cols, fill_value=0.0).values
     X_all = np.column_stack([quant, embed, ohe])
-    # Each model predicts log1p(target); average then invert for the EV/EBITDA scale.
     preds = np.mean([m.predict(X_all) for m in models], axis=0)
     return np.expm1(preds)
 
@@ -144,9 +151,14 @@ def _get_embed_model():
 
 def _features_from_info(ticker: str, info: dict) -> pd.DataFrame:
     quant = {feat: info.get(yf_key) for feat, yf_key in _YF_TO_FEATURE.items()}
-    missing = [k for k, v in quant.items() if v is None]
-    if missing:
-        raise ValueError(f"yfinance missing fields for {ticker}: {missing}")
+
+    missing_required = [k for k in _REQUIRED_FIELDS if quant.get(k) is None]
+    if missing_required:
+        raise ValueError(f"yfinance missing required fields for {ticker}: {missing_required}")
+
+    # forwardPE is optional — KNNImputer fills it using training-set neighbors.
+    if quant.get("forwardPE") is None:
+        quant["forwardPE"] = np.nan
 
     summary = info.get("longBusinessSummary") or ""
     if not summary:
@@ -175,13 +187,18 @@ def fetch_ticker_features(ticker: str) -> pd.DataFrame:
 
 
 def predict_ticker(ticker: str, models, imputer, scaler, pca, ohe_cols, embed_cols) -> dict:
-    """Predict EV/EBITDA for a live ticker. Returns {'predicted', 'actual'}."""
+    """Predict EV/EBITDA for a live ticker. Returns {'predicted', 'actual', 'info'}."""
     import yfinance as yf
     info = yf.Ticker(ticker).info
+    return predict_ticker_with_info(ticker, info, models, imputer, scaler, pca, ohe_cols, embed_cols)
+
+
+def predict_ticker_with_info(ticker: str, info: dict, models, imputer, scaler, pca, ohe_cols, embed_cols) -> dict:
+    """Like predict_ticker but accepts a pre-fetched yfinance info dict. Returns {'predicted', 'actual', 'info'}."""
     X = _features_from_info(ticker, info)
     predicted = float(predict_ev_to_ebitda(X, models, imputer, scaler, pca, ohe_cols, embed_cols)[0])
     actual = info.get("enterpriseToEbitda")
-    return {"predicted": predicted, "actual": actual}
+    return {"predicted": predicted, "actual": actual, "info": info}
 
 
 def save_artifacts(out: dict, path: Path = MODEL_PATH) -> None:
