@@ -37,6 +37,9 @@ data/**
 !data/processed/
 !data/processed/model.joblib
 
+# Poetry lock — excluding so Streamlit Community Cloud uses requirements.txt (pip) instead of Poetry
+poetry.lock
+
 # Environment & OS
 .env
 .DS_Store
