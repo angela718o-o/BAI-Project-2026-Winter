@@ -37,7 +37,9 @@ data/**
 !data/processed/
 !data/processed/model.joblib
 
-# Poetry lock — excluding so Streamlit Community Cloud uses requirements.txt (pip) instead of Poetry
+# Exclude Poetry files — Streamlit Community Cloud treats any pyproject.toml as Poetry and breaks.
+# Keep these locally for development; deployment uses requirements.txt instead.
+pyproject.toml
 poetry.lock
 
 # Environment & OS
