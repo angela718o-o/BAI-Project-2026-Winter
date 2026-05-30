@@ -4,22 +4,37 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import yfinance as yf
 import streamlit as st
 
 
-def fetch_info_with_retry(ticker: str, retries: int = 3, delay: float = 3.0) -> dict:
-    for attempt in range(retries):
-        try:
-            info = yf.Ticker(ticker).info
-            if info:
-                return info
-        except Exception as e:
-            if "429" in str(e) and attempt < retries - 1:
-                time.sleep(delay * (attempt + 1))
-                continue
-            raise
-    raise RuntimeError(f"Yahoo Finance rate-limited after {retries} attempts. Please wait a moment and try again.")
+def _make_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    })
+    retry = Retry(total=5, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    return session
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_info_cached(ticker: str) -> dict:
+    time.sleep(1)  # small baseline delay to reduce rate-limit hits
+    session = _make_session()
+    info = yf.Ticker(ticker, session=session).info
+    if not info or info.get("trailingPegRatio") is None and info.get("symbol") is None:
+        raise RuntimeError(f"Yahoo Finance returned empty data for {ticker}. Try again in a moment.")
+    return info
 
 from predict import MODEL_PATH, load_artifacts, predict_ticker_with_info
 
@@ -66,7 +81,7 @@ ticker = st.text_input(
 if st.button("Predict", type="primary") and ticker:
     with st.spinner(f"Fetching {ticker} from yfinance and predicting…"):
         try:
-            info = fetch_info_with_retry(ticker)
+            info = fetch_info_cached(ticker)
             r = predict_ticker_with_info(
                 ticker, info,
                 artifacts["models"], artifacts["imputer"], artifacts["scaler"],
