@@ -1,10 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.9.0+cpu
-numpy==2.3.5
-pandas==2.3.3
-scikit-learn==1.7.2
-yfinance==1.2.0
-xgboost==3.2.0
-streamlit==1.51.0
-sentence-transformers==5.3.0
-joblib==1.5.2
+pyarrow>=18.0
+numpy
+pandas
+scikit-learn
+yfinance
+xgboost
+streamlit
+sentence-transformers
+joblib
